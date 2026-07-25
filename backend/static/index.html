@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RepoPilot — Multi-Agent PR Reviewer</title>
+  <meta name="description" content="RepoPilot automatically reviews GitHub PRs using a multi-agent LangGraph pipeline with MCP tool transport." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & base ─────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --bg-card:   #161b22;
+      --bg-input:  #1c2230;
+      --border:    #30363d;
+      --border-hl: #388bfd;
+      --text:      #e6edf3;
+      --text-muted:#8b949e;
+      --accent:    #388bfd;
+      --accent-glow: rgba(56,139,253,0.25);
+      --green:     #3fb950;
+      --red:       #f85149;
+      --yellow:    #d29922;
+      --purple:    #a371f7;
+      --radius:    10px;
+      --font:      'Inter', system-ui, sans-serif;
+      --mono:      'JetBrains Mono', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Header ───────────────────────────────── */
+    header {
+      width: 100%;
+      padding: 24px 40px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg-card);
+    }
+    .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo span { color: var(--accent); }
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: rgba(56,139,253,0.15);
+      color: var(--accent);
+      border: 1px solid rgba(56,139,253,0.3);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    /* ── Main layout ──────────────────────────── */
+    main {
+      width: 100%;
+      max-width: 820px;
+      padding: 48px 24px 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ── Hero ─────────────────────────────────── */
+    .hero { text-align: center; }
+    .hero h1 {
+      font-size: clamp(26px, 4vw, 36px);
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+    .hero h1 em { color: var(--accent); font-style: normal; }
+    .hero p { color: var(--text-muted); font-size: 15px; line-height: 1.6; }
+
+    /* ── Input card ───────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #pr-url {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    #pr-url::placeholder { color: var(--text-muted); }
+    #pr-url:focus {
+      border-color: var(--border-hl);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    #run-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 22px;
+      font-family: var(--font);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #run-btn:hover { background: #58a6ff; box-shadow: 0 0 12px var(--accent-glow); }
+    #run-btn:active { transform: scale(0.97); }
+    #run-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .hint {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .hint code {
+      font-family: var(--mono);
+      background: rgba(255,255,255,0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Run ID badge ─────────────────────────── */
+    #run-meta {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    #run-meta.visible { display: flex; }
+    #run-meta code {
+      font-family: var(--mono);
+      color: var(--accent);
+      background: rgba(56,139,253,0.1);
+      padding: 3px 8px;
+      border-radius: 4px;
+    }
+
+    /* ── Pipeline trace ───────────────────────── */
+    #trace-section { display: none; }
+    #trace-section.visible { display: block; }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 14px;
+    }
+
+    #pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-input);
+      transition: border-color 0.3s, background 0.3s;
+      opacity: 0.4;
+      animation: none;
+    }
+    .step.active {
+      opacity: 1;
+      border-color: var(--accent);
+      background: rgba(56,139,253,0.06);
+      animation: pulse-border 1.5s infinite;
+    }
+    .step.done   { opacity: 1; border-color: var(--green); background: rgba(63,185,80,0.05); }
+    .step.error  { opacity: 1; border-color: var(--red);   background: rgba(248,81,73,0.06); }
+
+    @keyframes pulse-border {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(56,139,253,0); }
+      50%       { box-shadow: 0 0 0 4px rgba(56,139,253,0.2); }
+    }
+
+    .step-icon { font-size: 18px; min-width: 24px; text-align: center; }
+    .step-body { flex: 1; }
+    .step-name {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .step-summary {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+    }
+    .step-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(56,139,253,0.3);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .step.active .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Status banner ────────────────────────── */
+    #status-banner {
+      display: none;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 22px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 15px;
+      animation: fadeIn 0.4s ease;
+    }
+    #status-banner.visible { display: flex; }
+    #status-banner.clean   { border-color: var(--green); background: rgba(63,185,80,0.08); color: var(--green); }
+    #status-banner.issues  { border-color: var(--yellow); background: rgba(210,153,34,0.08); color: var(--yellow); }
+    #status-banner.fixed   { border-color: var(--purple); background: rgba(163,113,247,0.08); color: var(--purple); }
+    #status-banner.escalated { border-color: var(--red); background: rgba(248,81,73,0.08); color: var(--red); }
+    #status-banner.error   { border-color: var(--red); background: rgba(248,81,73,0.08); color: var(--red); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* ── Raw log ──────────────────────────────── */
+    #log-section { display: none; }
+    #log-section.visible { display: block; }
+
+    #log {
+      background: #010409;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #adbac7;
+      max-height: 240px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+    #log .ts { color: #545d68; }
+    #log .node-name { color: var(--accent); }
+    #log .ok  { color: var(--green); }
+    #log .err { color: var(--red); }
+
+    /* ── Footer ───────────────────────────────── */
+    footer {
+      margin-top: auto;
+      padding: 24px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      width: 100%;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Repo<span>Pilot</span></div>
+  <div class="badge">Beta</div>
+</header>
+
+<main>
+
+  <!-- Hero -->
+  <div class="hero">
+    <h1>Automated <em>PR Review</em> &amp; Fix</h1>
+    <p>Multi-agent system powered by LangGraph + MCP.<br>
+    Analyzes your diff, runs tests in a sandbox, and attempts an auto-fix if they fail.</p>
+  </div>
+
+  <!-- Input card -->
+  <div class="card">
+    <div class="input-row">
+      <input
+        id="pr-url"
+        type="url"
+        placeholder="https://github.com/owner/repo/pull/123"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button id="run-btn" onclick="startRun()">
+        <span id="btn-icon">▶</span>
+        <span id="btn-label">Run Review</span>
+      </button>
+    </div>
+    <p class="hint">
+      Try: <code>https://github.com/jayanthmarupaka/tinydb/pull/1</code>
+      (clean) or <code>/pull/626</code> (failing — triggers Fixer)
+    </p>
+  </div>
+
+  <!-- Run meta -->
+  <div id="run-meta">
+    <span>Run ID:</span>
+    <code id="run-id-display">—</code>
+    <a id="langfuse-link" href="#" target="_blank" style="font-size:12px; color: var(--accent);">View in Langfuse ↗</a>
+  </div>
+
+  <!-- Pipeline trace -->
+  <div id="trace-section">
+    <div class="section-title">Agent Pipeline</div>
+    <div id="pipeline">
+      <div class="step" id="step-plan">
+        <div class="step-icon">🗺️</div>
+        <div class="step-body">
+          <div class="step-name">Plan</div>
+          <div class="step-summary" id="sum-plan">Parse PR URL, fetch metadata</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-plan"></div>
+      </div>
+      <div class="step" id="step-analyzer">
+        <div class="step-icon">🔍</div>
+        <div class="step-body">
+          <div class="step-name">Analyzer</div>
+          <div class="step-summary" id="sum-analyzer">Fetch diff → GPT-4.1 code review</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-analyzer"></div>
+      </div>
+      <div class="step" id="step-test_runner">
+        <div class="step-icon">🧪</div>
+        <div class="step-body">
+          <div class="step-name">Test Runner</div>
+          <div class="step-summary" id="sum-test_runner">Clone branch → Docker sandbox → pytest</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-test_runner"></div>
+      </div>
+      <div class="step" id="step-fixer">
+        <div class="step-icon">🔧</div>
+        <div class="step-body">
+          <div class="step-name">Fixer</div>
+          <div class="step-summary" id="sum-fixer">GPT-4.1 patch → apply → retry (max 3)</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-fixer"></div>
+      </div>
+      <div class="step" id="step-test_runner_retry">
+        <div class="step-icon">🔁</div>
+        <div class="step-body">
+          <div class="step-name">Re-run Tests</div>
+          <div class="step-summary" id="sum-test_runner_retry">Verify patch in sandbox</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-test_runner_retry"></div>
+      </div>
+      <div class="step" id="step-compile_report">
+        <div class="step-icon">📄</div>
+        <div class="step-body">
+          <div class="step-name">Compile Report</div>
+          <div class="step-summary" id="sum-compile_report">Merge all results</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-compile_report"></div>
+      </div>
+      <div class="step" id="step-post_to_github">
+        <div class="step-icon">💬</div>
+        <div class="step-body">
+          <div class="step-name">Post to GitHub</div>
+          <div class="step-summary" id="sum-post_to_github">Comment on PR via GitHub MCP</div>
+        </div>
+        <div class="spinner"></div>
+        <div class="step-time" id="time-post_to_github"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status banner -->
+  <div id="status-banner"></div>
+
+  <!-- Raw event log -->
+  <div id="log-section">
+    <div class="section-title">Event Log</div>
+    <div id="log"></div>
+  </div>
+
+</main>
+
+<footer>
+  <a href="/docs">API Docs</a> &nbsp;·&nbsp;
+  <a href="https://github.com/jayanthmarupaka/RepoPilot" target="_blank">GitHub</a>
+  &nbsp;·&nbsp; Built with LangGraph + MCP
+</footer>
+
+<script>
+  // ── Node metadata map ──────────────────────────────────
+  const NODE_MAP = {
+    orchestrator:       "step-plan",
+    orchestrator_plan:  "step-plan",
+    plan:               "step-plan",
+    analyzer:           "step-analyzer",
+    test_runner:        "step-test_runner",
+    fixer:              "step-fixer",
+    test_runner_retry:  "step-test_runner_retry",
+    compile_report:     "step-compile_report",
+    post_to_github:     "step-post_to_github",
+  };
+
+  const STATUS_CONFIG = {
+    clean:              { cls: "clean",     icon: "✅", label: "All Clear — No issues detected, all tests pass." },
+    issues_found:       { cls: "issues",    icon: "⚠️", label: "Issues Found — Review the GitHub PR comment for details." },
+    fixed:              { cls: "fixed",     icon: "🔧", label: "Auto-Fixed — Patch verified and posted to GitHub." },
+    failing_escalated:  { cls: "escalated", icon: "🔴", label: "Needs Human Review — Fixer exhausted all attempts." },
+    error:              { cls: "error",     icon: "💥", label: "Run Error — Check the event log for details." },
+  };
+
+  let currentRunId = null;
+  let stepStartTimes = {};
+  let activeStep = null;
+  let sse = null;
+
+  // ── Helpers ────────────────────────────────────────────
+  function appendLog(html) {
+    const log = document.getElementById("log");
+    log.innerHTML += html + "\n";
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function timestamp() {
+    return new Date().toLocaleTimeString("en-US", { hour12: false });
+  }
+
+  function elapsed(stepId) {
+    if (!stepStartTimes[stepId]) return "";
+    const ms = Date.now() - stepStartTimes[stepId];
+    return ms > 1000 ? `${(ms/1000).toFixed(1)}s` : `${ms}ms`;
+  }
+
+  function setStepActive(stepId) {
+    if (!stepId) return;
+    const el = document.getElementById(stepId);
+    if (!el) return;
+    el.classList.add("active");
+    el.classList.remove("done", "error");
+    stepStartTimes[stepId] = Date.now();
+    activeStep = stepId;
+  }
+
+  function setStepDone(stepId, summary, isError = false) {
+    if (!stepId) return;
+    const el = document.getElementById(stepId);
+    if (!el) return;
+    el.classList.remove("active");
+    el.classList.add(isError ? "error" : "done");
+    if (summary) {
+      const sumEl = el.querySelector(".step-summary");
+      if (sumEl) sumEl.textContent = summary;
+    }
+    const timeEl = el.querySelector(".step-time");
+    if (timeEl) timeEl.textContent = elapsed(stepId);
+  }
+
+  function showStatusBanner(status) {
+    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.error;
+    const banner = document.getElementById("status-banner");
+    banner.className = `visible ${cfg.cls}`;
+    banner.innerHTML = `<span style="font-size:22px">${cfg.icon}</span> ${cfg.label}`;
+  }
+
+  // ── Start a run ────────────────────────────────────────
+  async function startRun() {
+    const prUrl = document.getElementById("pr-url").value.trim();
+    if (!prUrl) { alert("Please enter a GitHub PR URL."); return; }
+
+    // Close any previous SSE
+    if (sse) { sse.close(); sse = null; }
+
+    // Reset UI
+    document.querySelectorAll(".step").forEach(s => {
+      s.classList.remove("active", "done", "error");
+      s.querySelectorAll(".step-time").forEach(t => t.textContent = "");
+    });
+    document.getElementById("pipeline")
+      .querySelectorAll(".step-summary").forEach(s => {
+        // Restore original hint text from data attribute if available
+      });
+    document.getElementById("status-banner").className = "";
+    document.getElementById("log").innerHTML = "";
+    document.getElementById("log-section").classList.add("visible");
+    stepStartTimes = {};
+    activeStep = null;
+
+    const btn = document.getElementById("run-btn");
+    btn.disabled = true;
+    document.getElementById("btn-label").textContent = "Running…";
+    document.getElementById("btn-icon").textContent = "⏳";
+
+    // POST /runs
+    let runId;
+    try {
+      const resp = await fetch("/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pr_url: prUrl }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || resp.statusText);
+      }
+      const data = await resp.json();
+      runId = data.run_id;
+    } catch (e) {
+      appendLog(`<span class="err">[${timestamp()}] ❌ Failed to start run: ${e.message}</span>`);
+      resetBtn();
+      return;
+    }
+
+    currentRunId = runId;
+    document.getElementById("run-id-display").textContent = runId.slice(0, 8) + "…";
+    document.getElementById("run-meta").classList.add("visible");
+    document.getElementById("trace-section").classList.add("visible");
+    appendLog(`<span class="ts">[${timestamp()}]</span> 🚀 Run started — <span class="node-name">${runId}</span>`);
+
+    // Connect SSE
+    sse = new EventSource(`/runs/${runId}/stream`);
+
+    sse.onmessage = (e) => {
+      let evt;
+      try { evt = JSON.parse(e.data); } catch { return; }
+
+      const { node, status, summary } = evt;
+      const stepId = NODE_MAP[node];
+
+      appendLog(
+        `<span class="ts">[${timestamp()}]</span> ` +
+        `<span class="node-name">${node}</span> → ` +
+        `<span class="${status === 'done' ? 'ok' : status === 'error' ? 'err' : ''}">${status}</span>` +
+        (summary ? ` — ${summary}` : "")
+      );
+
+      if (status === "started") {
+        setStepActive(stepId);
+      } else if (status === "done") {
+        if (activeStep && activeStep !== stepId && stepId) {
+          // Mark previous step done, activate new one
+          setStepDone(activeStep, null);
+        }
+        setStepActive(stepId);
+        // Brief delay so user sees it as "active", then mark done
+        setTimeout(() => setStepDone(stepId, summary), 400);
+
+        if (node === "END" || node === "post_to_github") {
+          sse.close();
+          fetchFinalResult(runId);
+        }
+      } else if (status === "error") {
+        if (stepId) setStepDone(stepId, summary, true);
+        showStatusBanner("error");
+        sse.close();
+        resetBtn();
+      }
+    };
+
+    sse.onerror = () => {
+      if (sse.readyState === EventSource.CLOSED) {
+        fetchFinalResult(runId);
+      }
+    };
+  }
+
+  async function fetchFinalResult(runId) {
+    // Poll for final result
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const resp = await fetch(`/runs/${runId}`);
+        if (resp.status === 202) continue;  // still in progress
+        if (resp.ok) {
+          const data = await resp.json();
+          showStatusBanner(data.run_status);
+          appendLog(
+            `<span class="ts">[${timestamp()}]</span> ` +
+            `<span class="ok">✅ Run complete — status: ${data.run_status}</span>`
+          );
+          break;
+        }
+      } catch {}
+    }
+    resetBtn();
+  }
+
+  function resetBtn() {
+    const btn = document.getElementById("run-btn");
+    btn.disabled = false;
+    document.getElementById("btn-label").textContent = "Run Review";
+    document.getElementById("btn-icon").textContent = "▶";
+  }
+
+  // Enter key submits
+  document.getElementById("pr-url").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") startRun();
+  });
+</script>
+</body>
+</html>

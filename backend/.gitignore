@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment secrets — never commit
+.env
+
+# Sandbox per-run clones — gitignore the contents, keep the dir
+sandbox_workdir/
+
+# Binary downloads — too large to commit; place manually in bin/
+# Download from: https://github.com/github/github-mcp-server/releases
+bin/*.exe
+bin/github-mcp-server
+bin/LICENSE
+bin/README.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+*.tar
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (filesystem MCP server global install cache)
+node_modules/
+
+# Docker
+*.tar
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (filesystem MCP server global install cache)
+node_modules/

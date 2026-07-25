@@ -1,0 +1,75 @@
+services:
+  # ── Build the sandbox image so it's available on the host daemon ──────────
+  # This service immediately exits after being built — it's never started.
+  # The `app` container uses it via `docker run --rm repopilot-sandbox`.
+  sandbox:
+    build:
+      context: ..          # backend/ root
+      dockerfile: docker/sandbox.Dockerfile
+    image: repopilot-sandbox
+    command: ["tail", "-f", "/dev/null"]  # keeps container alive so compose stack stays running
+
+  app:
+    build:
+      context: ..          # backend/ root — where requirements.txt lives
+      dockerfile: docker/Dockerfile
+    container_name: repopilot-app
+    depends_on:
+      - sandbox            # ensures sandbox image is built first
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env            # load from backend/.env
+    environment:
+      # HOST-side absolute path to the sandbox workdir.
+      # The app container passes this path to `docker run -v <path>:/workspace`.
+      # Docker daemon (on the host) must be able to resolve this path.
+      # Override this in .env if your host path differs.
+      - SANDBOX_WORKDIR_HOST=${SANDBOX_WORKDIR_HOST:-}
+    volumes:
+      # Bind-mount app source for live reload in dev
+      - ../app:/app/app
+      - ../static:/app/static
+      - ../scripts:/app/scripts
+      # Sandbox workdir — shared between app container and docker daemon host
+      # so that `docker run --rm -v <host_path>:/workspace` works correctly.
+      # IMPORTANT: this path must be the HOST absolute path, not the container path.
+      - ../sandbox_workdir:/app/sandbox_workdir
+      # Docker socket — allows app container to spawn sibling containers
+      # (used by test_runner node to run `docker run --rm repopilot-sandbox`)
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Optional: self-hosted Langfuse ───────────────────────
+  # Uncomment the block below if you prefer self-hosted Langfuse
+  # instead of cloud.langfuse.com. Set LANGFUSE_HOST=http://langfuse:3000 in .env.
+  #
+  # langfuse:
+  #   image: langfuse/langfuse:latest
+  #   container_name: repopilot-langfuse
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+  #     - NEXTAUTH_SECRET=changeme
+  #     - SALT=changeme
+  #   depends_on:
+  #     - langfuse-db
+  #
+  # langfuse-db:
+  #   image: postgres:15
+  #   container_name: repopilot-langfuse-db
+  #   environment:
+  #     - POSTGRES_USER=langfuse
+  #     - POSTGRES_PASSWORD=langfuse
+  #     - POSTGRES_DB=langfuse
+  #   volumes:
+  #     - langfuse_db_data:/var/lib/postgresql/data
+
+# volumes:
+#   langfuse_db_data:
