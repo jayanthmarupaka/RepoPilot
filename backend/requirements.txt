@@ -1,0 +1,33 @@
+# ── API ──────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+python-multipart
+
+# ── LangGraph + LangChain ────────────────────────────────
+langgraph
+langchain
+langchain-openai
+langchain-core
+openai
+
+# ── MCP ──────────────────────────────────────────────────
+mcp[cli]
+
+# ── Tracing ──────────────────────────────────────────────
+langfuse
+
+# ── Config ───────────────────────────────────────────────
+python-dotenv
+pydantic
+pydantic-settings
+
+# ── SSE streaming ────────────────────────────────────────
+sse-starlette
+
+# ── Async + HTTP ─────────────────────────────────────────
+httpx
+anyio
+
+# ── Utilities ────────────────────────────────────────────
+tenacity
+structlog
