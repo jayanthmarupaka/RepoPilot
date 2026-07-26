@@ -19,13 +19,7 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - ../.env            # load from backend/.env
-    environment:
-      # HOST-side absolute path to the sandbox workdir.
-      # The app container passes this path to `docker run -v <path>:/workspace`.
-      # Docker daemon (on the host) must be able to resolve this path.
-      # Override this in .env if your host path differs.
-      - SANDBOX_WORKDIR_HOST=${SANDBOX_WORKDIR_HOST:-}
+      - ../.env            # load from backend/.env (includes SANDBOX_WORKDIR_HOST)
     volumes:
       # Bind-mount app source for live reload in dev
       - ../app:/app/app

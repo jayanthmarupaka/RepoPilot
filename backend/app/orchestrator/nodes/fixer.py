@@ -52,11 +52,15 @@ You will be given:
 2. The test failure output from pytest
 3. The current content of the relevant source files
 
-Your job is to propose a MINIMAL patch that fixes the test failures.
+Your job is to propose a patch that fixes ALL the test failures.
+
+IMPORTANT: Fix EVERY bug you find in ALL files. Do NOT fix only one file —
+include patches for ALL files that have issues causing test failures.
+The PR may have introduced bugs in multiple files. Fix them ALL in one response.
 
 Return ONLY a JSON object with this exact structure — no markdown, no extra text:
 {
-  "explanation": "<one sentence root cause and fix>",
+  "explanation": "<one sentence summary of ALL bugs found and fixed>",
   "files": [
     {
       "path": "<relative file path e.g. tinydb/table.py>",
@@ -64,6 +68,8 @@ Return ONLY a JSON object with this exact structure — no markdown, no extra te
     }
   ]
 }
+
+The "files" array MUST contain an entry for EVERY file that needs fixing.
 
 The "patch" field must be a valid unified diff fragment, e.g.:
 @@ -727,7 +727,7 @@
@@ -73,8 +79,9 @@ The "patch" field must be a valid unified diff fragment, e.g.:
          return current_id
 
 Rules:
-- Keep changes absolutely minimal — fix the specific bug only
-- Only include files that need changing
+- Fix ALL bugs across ALL files in a single response
+- Include a separate entry in "files" for each file that needs patching
+- Keep each individual change minimal — revert the specific bug only
 - The patch must apply cleanly to the file as provided
 - Return ONLY the JSON, no markdown fences, no comments outside JSON
 """
@@ -122,6 +129,15 @@ async def fixer(state: GraphState) -> dict:
                 if os.path.isfile(abs_path) and abs_path not in implicated_paths:
                     implicated_paths.append(abs_path)
 
+    # Also include files from analyzer issues — these are the files with known bugs
+    analysis_issues = state.get("analysis_issues", [])
+    for issue in analysis_issues:
+        rel = issue.get("file", "")
+        if rel and not rel.startswith("tests/") and not rel.startswith("test_"):
+            abs_path = os.path.join(workdir, rel)
+            if os.path.isfile(abs_path) and abs_path not in implicated_paths:
+                implicated_paths.append(abs_path)
+
     file_contents = {}
     for abs_path in implicated_paths[:5]:  # cap at 5 files to avoid token overflow
         try:
@@ -144,6 +160,19 @@ async def fixer(state: GraphState) -> dict:
         for path, content in file_contents.items()
     )
 
+    # Include analyzer issues so the fixer knows about ALL bugs
+    issues_section = ""
+    if analysis_issues:
+        issue_lines = []
+        for issue in analysis_issues:
+            if issue.get("severity") in ("critical", "warning"):
+                issue_lines.append(
+                    f"- **{issue.get('severity', '?').upper()}** `{issue.get('file', '?')}` "
+                    f"line {issue.get('line', '?')}: {issue.get('description', '?')}"
+                )
+        if issue_lines:
+            issues_section = "\n## Code Analyzer Issues (fix ALL of these)\n" + "\n".join(issue_lines)
+
     human_message = f"""## Original PR Diff
 ```diff
 {diff[:3000]}
@@ -153,11 +182,12 @@ async def fixer(state: GraphState) -> dict:
 ```
 {test_results.get('output', '')[-2000:]}
 ```
+{issues_section}
 
 ## Current Source Files
 {files_section}
 
-Please propose a fix."""
+Fix ALL the bugs in ALL files. Return patches for every file that needs fixing."""
 
     # 3. Call GPT-4.1
     try:
@@ -189,7 +219,7 @@ Please propose a fix."""
     # 4. Apply patch — apply unified diff or write full content
     explanation = patch_proposal.get("explanation", "")
     files_to_write = patch_proposal.get("files", [])
-    patch_summary_parts = [f"# Fixer Attempt {attempt}\n# {explanation}\n"]
+    patch_summary_parts = [f"## Fixer Attempt {attempt}\n**{explanation}**\n"]
 
     for file_entry in files_to_write:
         rel_path = file_entry.get("path", "")
@@ -199,28 +229,33 @@ Please propose a fix."""
 
         try:
             if "patch" in file_entry:
-                # Apply unified diff patch
-                import subprocess as _sp
                 patch_text_raw = file_entry["patch"]
-                # Write patch to a temp file and apply with `patch` command
-                # Fallback: apply manually using difflib
                 patch_applied = _apply_unified_diff(abs_path, patch_text_raw)
                 if patch_applied:
-                    patch_summary_parts.append(f"# Patched (diff): {rel_path}")
+                    # Include the actual diff in the summary so the developer sees the fix
+                    patch_summary_parts.append(f"### `{rel_path}`")
+                    patch_summary_parts.append(f"```diff")
+                    patch_summary_parts.append(patch_text_raw.strip())
+                    patch_summary_parts.append(f"```")
                     logger.info("node.fixer.file_patched", path=rel_path, method="diff")
                 else:
+                    patch_summary_parts.append(f"### `{rel_path}` — ⚠️ patch failed to apply")
                     logger.warning("node.fixer.patch_failed", path=rel_path)
             elif "content" in file_entry:
                 # Full file write (legacy fallback)
                 new_content = file_entry["content"]
                 if new_content:
                     await filesystem_client.write_file(abs_path, new_content)
-                    patch_summary_parts.append(f"# Replaced (full): {rel_path}")
+                    patch_summary_parts.append(f"### `{rel_path}` — full file replaced")
                     logger.info("node.fixer.file_patched", path=rel_path, method="full")
         except Exception as e:
             logger.error("node.fixer.write_error", path=rel_path, error=str(e))
 
-    patch_text = "\n".join(patch_summary_parts)
+    this_attempt_patch = "\n".join(patch_summary_parts)
+
+    # Accumulate patches across attempts so the final report shows ALL fixes
+    previous_patch = state.get("patch") or ""
+    accumulated_patch = (previous_patch + "\n\n" + this_attempt_patch).strip()
 
     logger.info(
         "node.fixer.done",
@@ -231,7 +266,7 @@ Please propose a fix."""
 
     return {
         "current_node": "fixer",
-        "patch": patch_text,
+        "patch": accumulated_patch,
         "attempt_count": attempt,
     }
 
@@ -239,18 +274,27 @@ Please propose a fix."""
 def _apply_unified_diff(file_path: str, diff_text: str) -> bool:
     """
     Apply a unified diff fragment to a file in-place.
+    Handles LLM-generated diffs which often have:
+    - Wrong line numbers in @@ headers
+    - Trailing whitespace differences
+    - Missing/extra newlines
     Returns True on success, False on failure.
     """
-    import difflib
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             original_lines = f.readlines()
 
         # Parse the @@ hunk(s) from the diff
         patched_lines = list(original_lines)
-        hunk_header_re = re.compile(r"^@@\s+-(?P<start>\d+)(?:,(?P<count>\d+))?\s+\+\d+(?:,\d+)?\s+@@")
+        hunk_header_re = re.compile(
+            r"^@@\s+-(?P<start>\d+)(?:,(?P<count>\d+))?\s+\+\d+(?:,\d+)?\s+@@"
+        )
 
         diff_lines = diff_text.splitlines(keepends=True)
+        # Ensure every diff line ends with \n for consistent comparison
+        diff_lines = [l if l.endswith("\n") else l + "\n" for l in diff_lines]
+
+        offset = 0  # track cumulative line shifts from earlier hunks
         i = 0
         while i < len(diff_lines):
             m = hunk_header_re.match(diff_lines[i])
@@ -265,19 +309,28 @@ def _apply_unified_diff(file_path: str, diff_text: str) -> bool:
                         hunk_orig.append(line[1:])
                     elif line.startswith("+"):
                         hunk_new.append(line[1:])
-                    else:  # context line
+                    else:  # context line (starts with ' ' or is plain text)
                         ctx = line[1:] if line.startswith(" ") else line
                         hunk_orig.append(ctx)
                         hunk_new.append(ctx)
                     i += 1
 
-                # Find hunk in original and replace
-                end = orig_start + len(hunk_orig)
-                if patched_lines[orig_start:end] == hunk_orig:
-                    patched_lines[orig_start:end] = hunk_new
+                if not hunk_orig:
+                    # Pure insertion — nothing to match, skip
+                    continue
+
+                # Try to find the hunk in the patched lines
+                match_pos = _find_hunk(patched_lines, hunk_orig, orig_start + offset)
+                if match_pos is not None:
+                    end = match_pos + len(hunk_orig)
+                    patched_lines[match_pos:end] = hunk_new
+                    offset += len(hunk_new) - len(hunk_orig)
                 else:
-                    # Context mismatch — try fuzzy match
-                    logger.warning("node.fixer.hunk_mismatch", file=file_path, start=orig_start)
+                    logger.warning(
+                        "node.fixer.hunk_mismatch",
+                        file=file_path,
+                        start=orig_start,
+                    )
                     return False
             else:
                 i += 1
@@ -289,3 +342,53 @@ def _apply_unified_diff(file_path: str, diff_text: str) -> bool:
     except Exception as e:
         logger.error("node.fixer.diff_apply_error", file=file_path, error=str(e))
         return False
+
+
+def _find_hunk(
+    lines: list[str], hunk_orig: list[str], hint_pos: int
+) -> int | None:
+    """
+    Find where `hunk_orig` matches inside `lines`.
+
+    Strategy:
+    1. Try exact match at hint_pos (the @@ line number)
+    2. Try normalized match at hint_pos (strip trailing whitespace)
+    3. Slide a window through the entire file looking for a normalized match
+    """
+    def _normalize(s: str) -> str:
+        return s.rstrip()
+
+    hunk_norm = [_normalize(h) for h in hunk_orig]
+    n = len(hunk_orig)
+
+    # 1. Exact match at hint
+    if hint_pos >= 0 and hint_pos + n <= len(lines):
+        if [l for l in lines[hint_pos : hint_pos + n]] == hunk_orig:
+            return hint_pos
+
+    # 2. Normalized match at hint
+    if hint_pos >= 0 and hint_pos + n <= len(lines):
+        file_norm = [_normalize(l) for l in lines[hint_pos : hint_pos + n]]
+        if file_norm == hunk_norm:
+            return hint_pos
+
+    # 3. Sliding window — search nearby first (±50 lines), then full file
+    search_order = []
+    for delta in range(1, 51):
+        for pos in (hint_pos - delta, hint_pos + delta):
+            if 0 <= pos and pos + n <= len(lines):
+                search_order.append(pos)
+    # Then the rest of the file
+    for pos in range(len(lines) - n + 1):
+        if pos not in search_order:
+            search_order.append(pos)
+
+    for pos in search_order:
+        if pos < 0 or pos + n > len(lines):
+            continue
+        file_norm = [_normalize(l) for l in lines[pos : pos + n]]
+        if file_norm == hunk_norm:
+            return pos
+
+    return None
+
