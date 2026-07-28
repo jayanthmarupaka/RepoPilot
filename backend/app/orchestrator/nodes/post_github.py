@@ -160,6 +160,16 @@ async def post_to_github(state: GraphState) -> dict:
 
     comment_body = _format_comment(report, run_status, patch)
 
+    if state.get("skip_post"):
+        # CLI --no-post: don't touch GitHub, print the report instead.
+        logger.info(
+            "node.post_github.skipped",
+            run_id=state["run_id"],
+            reason="skip_post flag set",
+        )
+        print(comment_body)
+        return {"current_node": "post_to_github"}
+
     try:
         await github_client.post_pr_comment(
             repo=state["repo_full_name"],

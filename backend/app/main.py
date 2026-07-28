@@ -64,6 +64,7 @@ async def _run_graph_task(run_id: str, pr_url: str):
     initial_state = {
         "pr_url": pr_url,
         "run_id": run_id,
+        "skip_post": False,
         "pr_number": 0,
         "repo_full_name": "",
         "head_branch": "",
