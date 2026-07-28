@@ -231,6 +231,10 @@ python scripts/run_graph.py --pr-url https://github.com/jayanthmarupaka/tinydb/p
 python scripts/run_graph.py --pr-url https://github.com/jayanthmarupaka/tinydb/pull/2 --no-post
 ```
 
+With `--no-post` the graph still runs fully (analysis, tests, repair), but the final
+GitHub comment is skipped and the formatted report is printed to stdout instead —
+useful for testing against real PRs without spamming them.
+
 ### 8 — Run the FastAPI server
 
 ```bash

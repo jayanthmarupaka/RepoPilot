@@ -37,6 +37,7 @@ async def run(pr_url: str, post_comment: bool = True) -> dict:
     initial_state = {
         "pr_url": pr_url,
         "run_id": run_id,
+        "skip_post": not post_comment,
         # These will be populated by orchestrator_plan
         "pr_number": 0,
         "repo_full_name": "",
@@ -64,9 +65,6 @@ async def run(pr_url: str, post_comment: bool = True) -> dict:
         config={
             "callbacks": [langfuse_handler],
             "run_id": run_id,
-            "configurable": {
-                "skip_github_post": not post_comment,
-            },
         },
     )
 

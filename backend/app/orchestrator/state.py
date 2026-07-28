@@ -12,6 +12,7 @@ class GraphState(TypedDict):
     # ── Input ──────────────────────────────────────────────
     pr_url: str
     run_id: str                  # UUID4 — ties SSE stream to this run
+    skip_post: bool              # True → skip the final GitHub comment post (CLI --no-post)
 
     # ── Parsed from URL ────────────────────────────────────
     pr_number: int
