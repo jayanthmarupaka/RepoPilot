@@ -153,13 +153,25 @@ async def _run_sandbox_pytest(workdir: str, run_label: str = "initial") -> dict:
         # Replace the container-side base with the host-side base
         container_base = os.path.realpath(os.path.abspath(settings.sandbox_workdir))
         host_workdir = workdir.replace(container_base, settings.sandbox_workdir_host, 1)
+        logger.debug(
+            "test_runner.path_translation",
+            sandbox_workdir_host=settings.sandbox_workdir_host,
+            container_base=container_base,
+            workdir=workdir,
+            host_workdir=host_workdir,
+        )
     else:
         host_workdir = workdir
+        logger.debug(
+            "test_runner.no_host_path",
+            workdir=workdir,
+            hint="SANDBOX_WORKDIR_HOST is not set — using container path as-is",
+        )
 
     # Use forward slashes for Docker volume mounts (required on Windows)
     workdir_docker = host_workdir.replace("\\", "/")
 
-    logger.info("test_runner.sandbox_run", label=run_label, workdir=workdir)
+    logger.info("test_runner.sandbox_run", label=run_label, workdir=workdir, mount=workdir_docker)
 
     # Phase 1: pip install (WITH network access)
     install_cmd = [

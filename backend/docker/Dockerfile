@@ -23,11 +23,14 @@ FROM python:3.11-slim AS runtime
 # Copy uv binary for use in runtime (optional, needed if runtime ever installs pkgs)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Docker CLI — needed to spawn sandbox containers from within the app container
+# Docker CLI — copy the official binary directly from docker:cli image.
+# This is the standard approach for sibling-container setups (mounting docker.sock).
+# The docker.io apt package on Debian slim is unreliable for CLI-only use.
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+
 # git — needed for cloning repositories via shell MCP
 # curl — needed for downloading binaries and healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
